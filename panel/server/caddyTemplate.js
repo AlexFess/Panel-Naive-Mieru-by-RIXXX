@@ -402,10 +402,12 @@ ${authLines}
     hide_via${probeLine}${upstreamLine}
   }
 
+  redir /sub /sub/ 301
   handle /sub/* {
     reverse_proxy 127.0.0.1:${parseInt(cfg.panelPort, 10) || 3000}
   }
 
+  redir /${sanitizeWebBasePath(cfg.webBasePath)} /${sanitizeWebBasePath(cfg.webBasePath)}/ 301
   handle /${sanitizeWebBasePath(cfg.webBasePath)}/* {
     reverse_proxy 127.0.0.1:${parseInt(cfg.panelPort, 10) || 3000}
   }
