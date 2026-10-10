@@ -256,8 +256,8 @@ function renderMainPathRoutes(cfg, mainDomain) {
   // the default subscription URL must be routed here as well.
   const subHost = subHostFromCfg(cfg) || domain;
   const panelHost = String(cfg.panelDomain || '').trim();
-  const subHere = sameCaddyHost(subHost, domain);
-  const panelHere = !!cfg.exposePanel && sameCaddyHost(panelHost, domain);
+  const subHere = sameCaddyHost(subHost, domain) || !subHost;
+  const panelHere = !!cfg.exposePanel && (sameCaddyHost(panelHost, domain) || !panelHost);
   if (!subHere && !panelHere) return '';
   let routes = '';
   if (subHere) routes += subPathRoutes(cfg);
@@ -430,7 +430,7 @@ ${authLines}
 
 ${mainSiteHandlers}
 }
-${renderPanelBlock(cfg)}${renderSubBlock(cfg)}`;
+// ${renderPanelBlock(cfg)}${renderSubBlock(cfg)}`;
 }
 
 module.exports = { render, renderPanelBlock, renderSubBlock, sanitizeWebBasePath };
