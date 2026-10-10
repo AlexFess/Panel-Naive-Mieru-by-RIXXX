@@ -55,9 +55,9 @@ BACKUP_DIR="/etc/rixxx-panel/backups"
 DB_PATH="/var/lib/rixxx-panel/db.sqlite"
 MITA_STATE_FILE="/var/lib/rixxx-panel/mita-state.json"
 
-REPO_URL="https://github.com/cwash797-cmd/Panel-Naive-Mieru-by-RIXXX"
+REPO_URL="https://github.com/AlexFess/Panel-Naive-Mieru-by-RIXXX"
 # Bug 99: raw base for fetching single files (VERSION, update.sh) without git.
-REPO_RAW="https://raw.githubusercontent.com/cwash797-cmd/Panel-Naive-Mieru-by-RIXXX/main"
+REPO_RAW="https://raw.githubusercontent.com/AlexFess/Panel-Naive-Mieru-by-RIXXX/main"
 
 # Bug 99: single source of truth for the target version. Priority:
 #   1) the VERSION file shipped next to this script (set by install/update);
@@ -1656,7 +1656,7 @@ smoke_test() {
   if [[ -f "${FAKE_SITE_DIR}/index.html" ]]; then
     echo -e "  ${GREEN}✓${NC} fake-site/index.html present"; (( pass++ ))
   else
-    echo -e "  ${YELLOW}⚠${NC}  fake-site/index.html missing (non-critical)"; 
+    echo -e "  ${YELLOW}⚠${NC}  fake-site/index.html missing (non-critical)";
   fi
 
   # Panel HTTP
