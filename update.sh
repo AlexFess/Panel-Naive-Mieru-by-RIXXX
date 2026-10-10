@@ -57,7 +57,7 @@ MITA_STATE_FILE="/var/lib/rixxx-panel/mita-state.json"
 
 REPO_URL="https://github.com/AlexFess/Panel-Naive-Mieru-by-RIXXX"
 # Bug 99: raw base for fetching single files (VERSION, update.sh) without git.
-REPO_RAW="https://raw.githubusercontent.com/AlexFess/Panel-Naive-Mieru-by-RIXXX/main"
+REPO_RAW="https://raw.githubusercontent.com/AlexFess/Panel-Naive-Mieru-by-RIXXX/feature/expose_port_on_base_domain"
 
 # Bug 99: single source of truth for the target version. Priority:
 #   1) the VERSION file shipped next to this script (set by install/update);
@@ -765,7 +765,7 @@ if (fs.existsSync(TEMPLATE_JS)) {
     try { subHost = new URL(/^https?:\/\//i.test(subRaw) ? subRaw : `https://${subRaw}`).host; }
     catch { subHost = subRaw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim(); }
   }
-  const mainHost = String(cfg.domain || 'localhost').trim();
+  const mainHost = String(cfg.domain || 'alexfess.hopto.org').trim();
   const panelOnMain = !!cfg.exposePanel && sameHost(cfg.panelDomain, mainHost);
   const subOnMain = !subRaw || sameHost(subHost, mainHost);
   let mainPathRoutes = '';
@@ -793,7 +793,7 @@ if (fs.existsSync(TEMPLATE_JS)) {
         ? '  handle /sub/* {\n    reverse_proxy 127.0.0.1:' + pPort +
           '\n  }\n  handle /api/federation/* {\n    reverse_proxy 127.0.0.1:' + pPort + '\n  }\n\n' : '';
       panelBlock = '\n\n' + pDom + ' {\n  tls ' + (cfg.adminEmail || '') +
-        '\n\n  redir /' + wbp + ' /' + wbp + '/ 301' +
+        '\n\n  redir /' + wbp + ' /' + wbp + '/ 301 //wtf' +
         '\n\n  handle_path /' + wbp + '/* {\n' + ba + '    reverse_proxy 127.0.0.1:' + pPort +
         '\n  }\n\n' + subRoutes + '  handle {\n    root * ' + stubDir + '\n    file_server\n  }\n}\n';
     } else if (panelOnMain && wbp) {
