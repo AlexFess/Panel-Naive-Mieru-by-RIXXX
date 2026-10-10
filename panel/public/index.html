@@ -75,7 +75,7 @@
     <div class="login-footer">
       <a href="https://t.me/russian_paradice_vpn" target="_blank" data-i18n="login.telegramSupport">Telegram Support</a>
       <span>·</span>
-      <a href="https://github.com/cwash797-cmd/Panel-Naive-Mieru-by-RIXXX" target="_blank" data-i18n="login.github">GitHub</a>
+      <a href="https://github.com/AlexFess/Panel-Naive-Mieru-by-RIXXX" target="_blank" data-i18n="login.github">GitHub</a>
     </div>
   </div>
 </div>
@@ -465,7 +465,7 @@
           <div class="card-header" data-i18n="settings.externalTitle">External Panel Access</div>
           <div class="card-body">
             <p class="card-desc" data-i18n="settings.externalDesc">
-              Expose the panel via a TLS subdomain (https://panel.&lt;domain&gt;/&lt;webBasePath&gt;/),
+              Expose the panel on a TLS hostname (subdomain or the main domain), using /&lt;webBasePath&gt;/,
               protected by basic auth. The panel always stays on 127.0.0.1:3000; Caddy reverse-proxies to it.
               The root and any path outside webBasePath show a static stub.
             </p>
@@ -477,13 +477,13 @@
             </div>
             <div id="external-fields">
               <div class="form-group">
-                <label data-i18n="settings.externalDomain">Panel subdomain</label>
-                <input type="text" id="s-panel-domain" placeholder="panel.example.com" autocomplete="off">
+                <label data-i18n="settings.externalDomain">Panel hostname (subdomain or main domain)</label>
+                <input type="text" id="s-panel-domain" placeholder="example.com or panel.example.com" autocomplete="off">
               </div>
               <div class="form-group">
                 <label data-i18n="settings.externalWebBasePath">webBasePath (secret path segment)</label>
                 <div class="input-with-btn">
-                  <input type="text" id="s-web-base-path" placeholder="a1b2c3d4e5f60718" autocomplete="off">
+                  <input type="text" id="s-web-base-path" placeholder="panel or a1b2c3d4e5f60718" autocomplete="off">
                   <button type="button" class="btn btn-secondary" data-action="gen-web-base-path"
                           data-i18n="settings.externalGenerate">Generate new</button>
                 </div>
@@ -506,9 +506,9 @@
 
             <hr style="border:none;border-top:1px solid var(--border);margin:18px 0">
             <div class="form-group">
-              <label data-i18n="settings.externalStubTitle">Stub page (shown at subdomain root / outside webBasePath)</label>
+              <label data-i18n="settings.externalStubTitle">Stub page (shown at dedicated subdomain root / outside webBasePath)</label>
               <p class="hint" data-i18n="settings.externalStubDesc">
-                Static HTML served by Caddy at the panel subdomain root and any path outside webBasePath.
+                Static HTML served by Caddy at a dedicated panel subdomain root and any path outside webBasePath.
                 Separate from the naive fake-site. Edit and save to replace it.
               </p>
               <textarea id="s-panel-stub" rows="8" spellcheck="false"
@@ -558,13 +558,13 @@
         <div class="card">
           <div class="card-header" data-i18n="settings.subDomainTitle">Subscription Domain (Sub-ссылка)</div>
           <div class="card-body">
-            <p class="card-desc" data-i18n="settings.subDomainDesc">Optional dedicated domain for client subscription links (e.g. https://sub.example.com). Leave empty to serve sub-links from the panel domain. Caddy auto-provisions the TLS certificate.</p>
+            <p class="card-desc" data-i18n="settings.subDomainDesc">Optional hostname for client subscription links. Use the main domain (https://example.com) to serve links at /sub/&lt;token&gt;, or a dedicated subdomain (https://sub.example.com). Leave empty to use the main domain. Caddy auto-provisions TLS.</p>
             <div class="form-group">
-              <label data-i18n="settings.subDomainLabel">Sub base URL</label>
-              <input type="text" id="s-sub-base-url" placeholder="https://sub.example.com" />
+              <label data-i18n="settings.subDomainLabel">Subscription base URL</label>
+              <input type="text" id="s-sub-base-url" placeholder="https://example.com or https://sub.example.com" />
             </div>
             <div class="alert alert-warning">
-              <strong>⚠</strong> <span data-i18n="settings.subDomainNote">Point an A-record for this host to this server's IP first, otherwise the TLS certificate cannot be issued.</span>
+              <strong>⚠</strong> <span data-i18n="settings.subDomainNote">Any non-empty hostname must resolve to this server before Caddy can issue its TLS certificate.</span>
             </div>
             <button class="btn btn-primary mt-2" data-action="save-sub-base-url" data-i18n="settings.applySubDomain">Save Sub Domain</button>
             <div id="sub-base-url-msg" class="msg-inline hidden"></div>

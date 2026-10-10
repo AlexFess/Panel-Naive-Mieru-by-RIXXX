@@ -83,9 +83,12 @@ ssh -L 3000:127.0.0.1:3000 root@<your-server-ip>
 
 ### Public mode
 ```bash
-sudo bash update.sh --expose vpn.example.com
-# Panel available at: http://vpn.example.com:8080/
+sudo bash update.sh --expose panel.example.com
+# Configure the external panel path/basic auth in Settings → External Panel Access.
+# Panel URL: https://panel.example.com/<webBasePath>/
 ```
+
+Alternatively, configure external access in **Settings → External Panel Access** with the main hostname and path segment `panel` to use `https://example.com/panel/`. The panel still listens only on `127.0.0.1:3000` and remains protected by basic auth plus panel login.
 
 ---
 
@@ -191,7 +194,7 @@ Click **"Sub-link"** on the user card to copy a single link like
 
 - The link passes **expiry and traffic** to the client via the `Subscription-Userinfo` header.
 - Manual format override: `?client=shadowrocket` / `?client=karing` or `?format=singbox`.
-- A dedicated `sub.<domain>` subdomain is set in Settings — Caddy provisions the TLS certificate automatically.
+- Leave the subscription base URL empty to use the main domain at `/sub/<token>`, or set a dedicated `sub.<domain>` hostname in Settings; Caddy provisions TLS automatically.
 - ✅ **Verified on real devices in Karing and Shadowrocket** — all three protocols connect.
 
 ### Universal Config (urltest auto-fallback)

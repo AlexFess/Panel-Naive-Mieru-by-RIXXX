@@ -87,9 +87,9 @@ _read_version_file() {
 }
 CURRENT_VERSION="$(_read_version_file)"
 [[ -z "$CURRENT_VERSION" ]] && CURRENT_VERSION="1.3.3"   # fallback if VERSION missing
-REPO_URL="https://github.com/cwash797-cmd/Panel-Naive-Mieru-by-RIXXX"
+REPO_URL="https://github.com/AlexFess/Panel-Naive-Mieru-by-RIXXX"
 # Bug 99: raw base for fetching single files (VERSION, update.sh) without git.
-REPO_RAW="https://raw.githubusercontent.com/cwash797-cmd/Panel-Naive-Mieru-by-RIXXX/main"
+REPO_RAW="https://raw.githubusercontent.com/AlexFess/Panel-Naive-Mieru-by-RIXXX/main"
 # Bug 1: direct download URL for caddy-forwardproxy-naive (amd64 only)
 CADDY_NAIVE_RELEASES="https://api.github.com/repos/klzgrad/forwardproxy/releases/latest"
 CADDY_NAIVE_FALLBACK_URL="https://github.com/klzgrad/forwardproxy/releases/download/v2.10.0-naive/caddy-forwardproxy-naive.tar.xz"
@@ -752,6 +752,15 @@ write_caddyfile() {
 
   # Bug 26: render Caddyfile via the shared caddyTemplate.js module
   local template_js="${PANEL_DIR}/server/caddyTemplate.js"
+  # On a fresh install the panel has not been copied to PANEL_DIR yet, but the
+  # checkout contains the canonical renderer beside install.sh. Use it now so
+  # initial same-host /panel and /sub routes match runtime/update rebuilds.
+  if [[ ! -f "$template_js" ]]; then
+    local source_dir; source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [[ -f "$source_dir/panel/server/caddyTemplate.js" ]]; then
+      template_js="$source_dir/panel/server/caddyTemplate.js"
+    fi
+  fi
   local caddyfile_content
 
   # Bug 46: log template errors to INSTALL_LOG instead of swallowing them

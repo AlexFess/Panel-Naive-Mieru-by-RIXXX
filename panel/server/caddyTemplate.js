@@ -100,23 +100,23 @@ function parseFakeUpstream(rawUrl) {
   return { useProxy: true, scheme, host };
 }
 
-// ── v1.4.0: panel external-access subdomain block ─────────────────────────────
-// External access to the admin panel is served ONLY through a dedicated TLS
-// subdomain (panel.<domain>), never via a bare HTTP port. The panel itself
+// ── External panel access ────────────────────────────────────────────────────
+// External access to the admin panel is served through a TLS hostname (dedicated
+// subdomain or main domain), never via a bare HTTP port. The panel itself
 // always listens on loopback (127.0.0.1:3000); Caddy reverse_proxies to it.
 //
 // Architecture:
-//   https://panel.<domain>/<webBasePath>/*   →  basic_auth + handle_path → reverse_proxy 127.0.0.1:3000
-//   https://panel.<domain>/  and any other path → static stub (file_server, local HTML)
+//   https://<host>/<webBasePath>/*   →  basic_auth + handle_path → reverse_proxy 127.0.0.1:3000
+//   A dedicated panel subdomain's root/outside path → static stub.
 //
 //   • handle_path strips the /<webBasePath> prefix before proxying, so the
 //     panel never sees (or needs to know) the prefix — the most robust approach.
 //     A change of webBasePath therefore does not require any panel-side change.
 //   • basic_auth is a layer OVER the panel login, never a replacement.
 //   • The stub (panelStubPage / its directory) is served by file_server for the
-//     subdomain root and every path outside webBasePath — NOT a redirect to login.
-//   • This is a SEPARATE site block keyed on the panel.<domain> host, so it does
-//     NOT collide with the naive ":<port>, <domain>" catch-all on :443.
+//     dedicated subdomain root and every path outside webBasePath — NOT a redirect to login.
+//   • Main-domain routes share the existing Naive site block; dedicated hosts get
+//     their own site block to avoid duplicate Caddy site addresses.
 //
 // Returns '' (empty) when external access is disabled or misconfigured, so the
 // caller appends nothing and the panel stays loopback-only.
@@ -127,63 +127,49 @@ function sanitizeWebBasePath(raw) {
   return s;
 }
 
+function panelPathRoutes(cfg) {
+  const baUser      = String(cfg.panelBasicAuthUser || '').trim();
+  const baHash      = extractBcrypt(String(cfg.panelBasicAuthHash || ''));
+  const webBasePath = sanitizeWebBasePath(cfg.webBasePath);
+  const panelPort   = parseInt(cfg.panelPort, 10) || 3000;
+  if (!webBasePath) return '';
+
+  let basicAuthBlock = '';
+  if (baUser && baHash) basicAuthBlock = `    basic_auth {\n      ${baUser} ${baHash}\n    }\n`;
+  return `  redir /${webBasePath} /${webBasePath}/ 301\n\n  handle_path /${webBasePath}/* {\n${basicAuthBlock}    reverse_proxy 127.0.0.1:${panelPort}\n  }\n`;
+}
+
 function renderPanelBlock(cfg) {
   const expose      = !!cfg.exposePanel;
   const panelDomain = String(cfg.panelDomain || '').trim();
   const email       = String(cfg.adminEmail || '').trim();
-  const baUser      = String(cfg.panelBasicAuthUser || '').trim();
-  // BUG-155: a polluted hash (apt output captured by an old installer) must
-  // NEVER reach the Caddyfile — it produced a multi-line basic_auth block that
-  // failed `caddy validate` and dropped caddy-naive into a restart loop. Sieve
-  // the stored value to a single valid bcrypt token; if none is present, emit
-  // no basic_auth line (the operator re-sets the password) rather than a broken
-  // config.
-  const baHash      = extractBcrypt(String(cfg.panelBasicAuthHash || ''));
   const stubFile    = String(cfg.panelStubPage || '/var/www/panel-stub/index.html').trim();
   const webBasePath = sanitizeWebBasePath(cfg.webBasePath);
-  const panelPort   = parseInt(cfg.panelPort, 10) || 3000;
+  const mainDomain  = String(cfg.domain || '').trim().toLowerCase();
+  const panelHost   = panelDomain.toLowerCase();
 
-  // External access requires, at minimum, a panel subdomain and a webBasePath.
+  // External access requires a hostname (main domain or subdomain) and a path.
   if (!expose || !panelDomain || !webBasePath) return '';
+  // The main site block will include these routes; emitting a second block for
+  // the same Caddy address causes duplicate-site conflicts.
+  if (panelHost === mainDomain) return '';
 
-  // The stub root directory holds the local static "CONNECTION" page that is
-  // served for the subdomain root and any path outside webBasePath.
   const stubDir = stubFile.replace(/\/[^/]*$/, '') || '/var/www/panel-stub';
+  const panelRoutes = panelPathRoutes(cfg);
+  if (!panelRoutes) return '';
+  const subRoutes = subHostFromCfg(cfg).toLowerCase() === panelHost
+    ? subPathRoutes(cfg) : '';
 
-  // basic_auth block — only emitted when a username + bcrypt hash are present.
-  // Caddy v2 syntax: `basic_auth { <user> <bcrypt-hash> }`. The hash must be a
-  // bcrypt hash produced by `caddy hash-password`.
-  let basicAuthBlock = '';
-  if (baUser && baHash) {
-    basicAuthBlock =
-`    basic_auth {
-      ${baUser} ${baHash}
-    }
-`;
-  }
-
-  // handle_path strips the /<webBasePath> prefix, so reverse_proxy sees "/".
-  // Everything else (root + any non-matching path) falls through to file_server.
-  //
-  // BUG-140: the bare prefix (no trailing slash) MUST redirect to "/<wbp>/" so
-  // the SPA's relative assets (style.css, app.js) resolve under the prefix.
-  // Without it, https://d/<wbp> would load index.html but resolve app.js to
-  // https://d/app.js (404). The frontend then carries the prefix on every
-  // /api and /locales request via window-derived BASE_PATH.
   return `
 
-# ── v1.4.0: panel external access (TLS + basic_auth + webBasePath) ────────────
+# ── External panel access (TLS + basic_auth + path) ──────────────────────────
 ${panelDomain} {
   tls ${email}
 
-  # Normalize the bare base path to a trailing slash so relative assets resolve.
-  redir /${webBasePath} /${webBasePath}/ 301
+${panelRoutes}
+${subRoutes}
 
-  handle_path /${webBasePath}/* {
-${basicAuthBlock}    reverse_proxy 127.0.0.1:${panelPort}
-  }
-
-  # Root and any path outside the secret base path → static stub (not a redirect)
+  # Root and any path outside the panel path → static stub.
   handle {
     root * ${stubDir}
     file_server
@@ -192,24 +178,32 @@ ${basicAuthBlock}    reverse_proxy 127.0.0.1:${panelPort}
 `;
 }
 
-// ── v1.8.7: subscription sub-domain block ────────────────────────────────────
-// When the admin configures a dedicated subscription domain (cfg.subBaseUrl,
-// e.g. https://sub.example.com), Caddy must (a) auto-provision a TLS cert for
-// that host and (b) reverse_proxy the public /sub/* path to the loopback panel.
-// Everything else on the sub domain returns 404 (no admin surface exposed).
-//
-// Returns '' when no sub domain is configured (or it equals the main domain, in
-// which case /sub/ is already served by the panel externally) so the caller
-// appends nothing.
+// ── Subscription routes ─────────────────────────────────────────────────────
+// Dedicated subscription hostnames get a minimal TLS site that proxies only
+// /sub/* and hardened federation routes. If the subscription host is the main
+// domain (or unset, which defaults to it), these routes are instead added to the
+// existing Naive site by renderMainPathRoutes().
 function subHostFromCfg(cfg) {
   const raw = String(cfg.subBaseUrl || '').trim();
   if (!raw) return '';
-  return raw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim();
+  try { return new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).host; }
+  catch { return raw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim(); }
+}
+
+function subPathRoutes(cfg) {
+  const panelPort = parseInt(cfg.panelPort, 10) || 3000;
+  return `  handle /sub/* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }\n  handle /api/federation/* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }\n`;
 }
 
 function renderSubBlock(cfg) {
   const host = subHostFromCfg(cfg);
   if (!host) return '';
+  const mainHost = String(cfg.domain || '').trim().toLowerCase();
+  const panelHost = String(cfg.panelDomain || '').trim().toLowerCase();
+  const expose = !!cfg.exposePanel;
+  // Main-domain routes are inserted into the main Naive site; when panel and
+  // subscription share a dedicated host, renderPanelBlock owns their one site.
+  if (host.toLowerCase() === mainHost || (expose && host.toLowerCase() === panelHost)) return '';
   const email     = String(cfg.adminEmail || '').trim();
   const panelPort = parseInt(cfg.panelPort, 10) || 3000;
   // v1.9.6: also expose the federation NODE endpoints on the sub domain. They are
@@ -230,17 +224,27 @@ function renderSubBlock(cfg) {
 # ── v1.8.7 + v1.9.6 + v1.10.1: subscription domain (public /sub/* + federation → panel) ─
 ${host} {
   tls ${email}
-  handle /sub/* {
-    reverse_proxy 127.0.0.1:${panelPort}
-  }
-  handle /api/federation/* {
-    reverse_proxy 127.0.0.1:${panelPort}
-  }
+${subPathRoutes(cfg)}
   handle {
     respond "Not found" 404
   }
 }
 `;
+}
+
+function renderMainPathRoutes(cfg, mainDomain) {
+  const domain = String(mainDomain || '').trim().toLowerCase();
+  // subBaseUrl() in the panel falls back to the main hostname when unset, so
+  // the default subscription URL must be routed here as well.
+  const subHost = (subHostFromCfg(cfg) || domain).toLowerCase();
+  const panelHost = String(cfg.panelDomain || '').trim().toLowerCase();
+  const subHere = !!subHost && subHost === domain;
+  const panelHere = !!cfg.exposePanel && panelHost === domain;
+  if (!subHere && !panelHere) return '';
+  let routes = '';
+  if (subHere) routes += subPathRoutes(cfg);
+  if (panelHere) routes += panelPathRoutes(cfg);
+  return routes;
 }
 
 function render(cfg, naiveUsers) {
@@ -330,6 +334,10 @@ function render(cfg, naiveUsers) {
     root ${fakeSite}
   }`;
   }
+  const mainPathRoutes = renderMainPathRoutes(cfg, domain);
+  const mainSiteHandlers = mainPathRoutes
+    ? `${mainPathRoutes}  handle {\n${masqueradeBlock}\n  }`
+    : masqueradeBlock;
 
   // ── Bug 28: no redundant  tls <email>  inside the site block  ────────────
   // Caddy's automatic HTTPS handles TLS for domains that resolve to this
@@ -376,8 +384,8 @@ function render(cfg, naiveUsers) {
   #   - listen on ":${port}, ${domain}" (catch-all :${port} + the domain) so the
   #     CONNECT request matches this site regardless of how the client sets SNI/Host
   #   - explicit "tls <email>" inside the block (not relying on the global email)
-  #   - no route{} wrapper — forward_proxy/file_server directly in the site block
-  #     (ordering comes from the global "order forward_proxy first")
+  #   - forward_proxy remains a direct site handler; endpoint paths, when enabled,
+  #     are matched by the following handle blocks before the masquerade fallback.
   tls ${email}
 
   # Traffic accounting: per-site ACCESS log — THIS is what writes a JSON line
@@ -402,7 +410,7 @@ ${authLines}
     hide_via${probeLine}${upstreamLine}
   }
 
-${masqueradeBlock}
+${mainSiteHandlers}
 }
 ${renderPanelBlock(cfg)}${renderSubBlock(cfg)}`;
 }

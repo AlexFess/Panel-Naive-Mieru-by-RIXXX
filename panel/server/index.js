@@ -318,9 +318,9 @@ function getUserById(id) {
   if (db) return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   return memUsers.get(id);
 }
-// v1.8.7: resolve the base URL for subscription links. Uses the optional
-// `subBaseUrl` setting when the admin has configured a dedicated sub domain
-// (e.g. https://sub.example.com); otherwise falls back to https://<panel domain>.
+// v1.8.7: resolve the origin for subscription links. Uses the optional
+// `subBaseUrl` hostname (dedicated subdomain or the main hostname); otherwise
+// falls back to https://<server domain>. Caddy serves /sub/* on that host.
 // Always returns a value WITHOUT a trailing slash.
 function subBaseUrl() {
   let base = String(cfg.subBaseUrl || '').trim();
@@ -1857,6 +1857,22 @@ app.post('/api/config', requireAuth, (req, res) => {
     }
   }
 
+  // Subscription links append the fixed public route `/sub/<token>` to this
+  // origin. A path/query here would produce a URL Caddy does not route.
+  if (req.body.subBaseUrl !== undefined) {
+    const rawSub = String(req.body.subBaseUrl || '').trim();
+    if (rawSub) {
+      let parsedSub;
+      try { parsedSub = new URL(/^https?:\/\//i.test(rawSub) ? rawSub : `https://${rawSub}`); }
+      catch (_) { return res.status(400).json({ error: 'subBaseUrl must be a hostname or http(s) origin' }); }
+      if (!/^https?:$/.test(parsedSub.protocol) || !HOSTNAME_RE.test(parsedSub.hostname) ||
+          (parsedSub.pathname !== '/' && parsedSub.pathname !== '') || parsedSub.search || parsedSub.hash ||
+          parsedSub.username || parsedSub.password) {
+        return res.status(400).json({ error: 'subBaseUrl must be a hostname or http(s) origin without a path' });
+      }
+    }
+  }
+
   // v1.9.5: validate federationNodes BEFORE mutating cfg. It must be an array of
   // { name, url, token, enabled } objects with plausible http(s) urls. A bad
   // payload is rejected with 400 so a malformed list can never reach /sub.
@@ -2276,13 +2292,15 @@ app.post('/api/panel/external-access', requireAuth, (req, res) => {
   if (enabled) {
     const domain = String(body.panelDomain || cfg.panelDomain || '').trim();
     if (!domain || !HOSTNAME_RE.test(domain))
-      return res.status(400).json({ error: 'Valid panel subdomain required (e.g. panel.example.com)' });
+      return res.status(400).json({ error: 'Valid panel hostname required (e.g. example.com or panel.example.com)' });
 
     // webBasePath: explicit value (sanitized) or keep existing or generate.
     let wbp = String(body.webBasePath || cfg.webBasePath || '').trim().replace(/^\/+|\/+$/g, '');
     if (!wbp) wbp = crypto.randomBytes(8).toString('hex');
     if (!WEBBASE_RE.test(wbp))
       return res.status(400).json({ error: 'webBasePath must match [A-Za-z0-9._~-] (1–64 chars)' });
+    if (/^(sub|api)$/i.test(wbp))
+      return res.status(400).json({ error: 'webBasePath cannot be sub or api; those paths are reserved for public endpoints' });
 
     const baUser = String(body.basicAuthUser || cfg.panelBasicAuthUser || 'admin').trim();
     if (!USERNAME_RE.test(baUser))

@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+'use strict';
+
+const assert = require('assert');
+const template = require('../panel/server/caddyTemplate');
+
+const base = {
+  domain: 'example.com', adminEmail: 'admin@example.com', naivePort: 443,
+  panelPort: 3000, fakeSiteDir: '/var/www/fake-site',
+  exposePanel: false, panelDomain: '', webBasePath: '',
+  panelBasicAuthUser: '', panelBasicAuthHash: '', subBaseUrl: '',
+};
+const users = [{ username: 'test', password: 'secret' }];
+
+const defaultSubRoutes = template.render(base, users);
+assert.match(defaultSubRoutes, /handle \/sub\/\*/,
+  'default subscription links use the main host and need a proxy route there');
+assert.match(defaultSubRoutes, /handle \/api\/federation\/\*/);
+
+const mainDomainPaths = template.render({
+  ...base,
+  exposePanel: true,
+  panelDomain: 'example.com',
+  webBasePath: 'panel',
+  panelBasicAuthUser: 'admin',
+  panelBasicAuthHash: '$2a$12$.VJ5i4YcgO816PmEG4Gju.NPxD80CLKCHgFJD94F0yGbSWgcW6w02',
+  subBaseUrl: 'https://example.com',
+}, users);
+assert.match(mainDomainPaths, /handle_path \/panel\/\*/);
+assert.match(mainDomainPaths, /handle \/sub\/\*/);
+assert.match(mainDomainPaths, /handle \/api\/federation\/\*/);
+assert.match(mainDomainPaths, /redir \/panel \/panel\//);
+assert.match(mainDomainPaths, /basic_auth \{\s+admin \$2a\$12\$/,
+  'the base-domain panel path keeps its HTTP basic-auth layer');
+assert.doesNotMatch(mainDomainPaths, /\nexample\.com \{\n  tls/,
+  'same-domain routes must not create duplicate Caddy site blocks');
+
+const subdomainPanel = template.render({
+  ...base,
+  exposePanel: true,
+  panelDomain: 'panel.example.com',
+  webBasePath: 'panel',
+  subBaseUrl: 'https://sub.example.com',
+}, users);
+assert.match(subdomainPanel, /panel\.example\.com \{[\s\S]*handle_path \/panel\/\*/);
+assert.match(subdomainPanel, /sub\.example\.com \{[\s\S]*handle \/sub\/\*/);
+
+const sharedDedicatedHost = template.render({
+  ...base,
+  exposePanel: true,
+  panelDomain: 'links.example.com',
+  webBasePath: 'panel',
+  subBaseUrl: 'https://links.example.com',
+}, users);
+assert.strictEqual((sharedDedicatedHost.match(/links\.example\.com \{/g) || []).length, 1);
+assert.match(sharedDedicatedHost, /links\.example\.com \{[\s\S]*handle_path \/panel\/\*[\s\S]*handle \/sub\/\*/);
+
+console.log('Path-based panel and subscription routing tests passed');

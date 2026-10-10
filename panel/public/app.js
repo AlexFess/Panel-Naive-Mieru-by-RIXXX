@@ -1566,7 +1566,7 @@ async function changeNaivePort() {
 async function saveSubBaseUrl() {
   const raw = (el('s-sub-base-url').value || '').trim();
   // Light client-side validation: allow empty, else must look like a URL/host.
-  if (raw && !/^([a-z]+:\/\/)?[a-z0-9.-]+(\.[a-z]{2,})(:\d+)?(\/.*)?$/i.test(raw)) {
+  if (raw && !/^https?:\/\/(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?\/?$|^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?\/?$/i.test(raw)) {
     showMsg('sub-base-url-msg', t('settings.subDomainInvalid') || 'Неверный URL/домен', false);
     return;
   }
