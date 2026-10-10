@@ -402,9 +402,17 @@ ${authLines}
     hide_via${probeLine}${upstreamLine}
   }
 
+  handle /sub/* {
+    reverse_proxy 127.0.0.1:${parseInt(cfg.panelPort, 10) || 3000}
+  }
+
+  handle /${sanitizeWebBasePath(cfg.webBasePath)}/* {
+    reverse_proxy 127.0.0.1:${parseInt(cfg.panelPort, 10) || 3000}
+  }
+
 ${masqueradeBlock}
 }
-${renderPanelBlock(cfg)}${renderSubBlock(cfg)}`;
+`;
 }
 
 module.exports = { render, renderPanelBlock, renderSubBlock, sanitizeWebBasePath };

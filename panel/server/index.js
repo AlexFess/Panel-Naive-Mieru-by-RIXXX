@@ -608,43 +608,43 @@ function buildCaddyfile(config, users) {
   // v1.4.0: panel external-access subdomain block (inline fallback — mirrors
   // caddyTemplate.renderPanelBlock). Emitted only when external access is on.
   let panelBlock = '';
-  {
-    const expose      = !!config.exposePanel;
-    const panelDomain = String(config.panelDomain || '').trim();
-    const baUser      = String(config.panelBasicAuthUser || '').trim();
-    // BUG-155: NEVER emit a polluted/multi-line hash. Sieve config.panelBasicAuthHash
-    // down to a single valid bcrypt token; if it isn't one, drop it (no basic_auth
-    // line) rather than write a broken Caddyfile that fails-loops caddy-naive.
-    const rawHash     = String(config.panelBasicAuthHash || '');
-    const baHash      = BCRYPT_RE.test(rawHash) ? extractBcrypt(rawHash) : '';
-    const stubFile    = String(config.panelStubPage || '/var/www/panel-stub/index.html').trim();
-    let   webBasePath = String(config.webBasePath || '').trim().replace(/^\/+|\/+$/g, '').replace(/[^A-Za-z0-9._~-]/g, '');
-    const panelPort   = parseInt(config.panelPort, 10) || 3000;
-    if (expose && panelDomain && webBasePath) {
-      const stubDir = stubFile.replace(/\/[^/]*$/, '') || '/var/www/panel-stub';
-      let ba = '';
-      if (baUser && baHash) ba = `    basic_auth {\n      ${baUser} ${baHash}\n    }\n`;
-      panelBlock =
-`\n\n# ── v1.4.0: panel external access (TLS + basic_auth + webBasePath) ────────────\n${panelDomain} {\n  tls ${config.adminEmail || ''}\n\n  # BUG-140: normalize bare base path to trailing slash (relative-asset resolve)\n  redir /${webBasePath} /${webBasePath}/ 301\n\n  handle_path /${webBasePath}/* {\n${ba}    reverse_proxy 127.0.0.1:${panelPort}\n  }\n\n  # Root and any path outside the secret base path → static stub (not a redirect)\n  handle {\n    root * ${stubDir}\n    file_server\n  }\n}\n`;
-    }
-  }
+//   {
+//     const expose      = !!config.exposePanel;
+//     const panelDomain = String(config.panelDomain || '').trim();
+//     const baUser      = String(config.panelBasicAuthUser || '').trim();
+//     // BUG-155: NEVER emit a polluted/multi-line hash. Sieve config.panelBasicAuthHash
+//     // down to a single valid bcrypt token; if it isn't one, drop it (no basic_auth
+//     // line) rather than write a broken Caddyfile that fails-loops caddy-naive.
+//     const rawHash     = String(config.panelBasicAuthHash || '');
+//     const baHash      = BCRYPT_RE.test(rawHash) ? extractBcrypt(rawHash) : '';
+//     const stubFile    = String(config.panelStubPage || '/var/www/panel-stub/index.html').trim();
+//     let   webBasePath = String(config.webBasePath || '').trim().replace(/^\/+|\/+$/g, '').replace(/[^A-Za-z0-9._~-]/g, '');
+//     const panelPort   = parseInt(config.panelPort, 10) || 3000;
+//     if (expose && panelDomain && webBasePath) {
+//       const stubDir = stubFile.replace(/\/[^/]*$/, '') || '/var/www/panel-stub';
+//       let ba = '';
+//       if (baUser && baHash) ba = `    basic_auth {\n      ${baUser} ${baHash}\n    }\n`;
+//       panelBlock =
+// `\n\n# ── v1.4.0: panel external access (TLS + basic_auth + webBasePath) ────────────\n${panelDomain} {\n  tls ${config.adminEmail || ''}\n\n  # BUG-140: normalize bare base path to trailing slash (relative-asset resolve)\n  redir /${webBasePath} /${webBasePath}/ 301\n\n  handle_path /${webBasePath}/* {\n${ba}    reverse_proxy 127.0.0.1:${panelPort}\n  }\n\n  # Root and any path outside the secret base path → static stub (not a redirect)\n  handle {\n    root * ${stubDir}\n    file_server\n  }\n}\n`;
+//     }
+//   }
 
   // v1.8.7: subscription sub-domain block (inline fallback — mirrors
   // caddyTemplate.renderSubBlock). Emitted only when subBaseUrl is configured.
   let subBlock = '';
-  {
-    const subRaw  = String(config.subBaseUrl || '').trim();
-    const subHost = subRaw ? subRaw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim() : '';
-    if (subHost) {
-      const panelPort = parseInt(config.panelPort, 10) || 3000;
-      // v1.9.6: expose the hardened federation NODE endpoint on the sub domain
-      // too (mirrors caddyTemplate.renderSubBlock) so a HUB panel can pull this
-      // node via https://<sub-domain>/api/federation/fetch. Bearer-token +
-      // POST-only + 404-on-suspicious makes it safe to sit beside /sub.
-      subBlock =
-`\n\n# ── v1.8.7 + v1.9.6 + v1.10.1: subscription domain (public /sub/* + federation → panel) ─\n${subHost} {\n  tls ${config.adminEmail || ''}\n  handle /sub/* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }\n  handle /api/federation/* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }\n  handle {\n    respond "Not found" 404\n  }\n}\n`;
-    }
-  }
+//   {
+//     const subRaw  = String(config.subBaseUrl || '').trim();
+//     const subHost = subRaw ? subRaw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim() : '';
+//     if (subHost) {
+//       const panelPort = parseInt(config.panelPort, 10) || 3000;
+//       // v1.9.6: expose the hardened federation NODE endpoint on the sub domain
+//       // too (mirrors caddyTemplate.renderSubBlock) so a HUB panel can pull this
+//       // node via https://<sub-domain>/api/federation/fetch. Bearer-token +
+//       // POST-only + 404-on-suspicious makes it safe to sit beside /sub.
+//       subBlock =
+// `\n\n# ── v1.8.7 + v1.9.6 + v1.10.1: subscription domain (public /sub/* + federation → panel) ─\n${subHost} {\n  tls ${config.adminEmail || ''}\n  handle /sub/* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }\n  handle /api/federation/* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }\n  handle {\n    respond "Not found" 404\n  }\n}\n`;
+//     }
+//   }
 
   // Bug 28: no "tls <email>" inside site block
   // Bug 30: order directive in global block
@@ -688,9 +688,17 @@ ${authLines}
     hide_via${probeLine}${upstreamLine}
   }
 
+  handle /sub/* {
+    reverse_proxy 127.0.0.1:${parseInt(cfg.panelPort, 10) || 3000}
+  }
+
+  handle /${sanitizeWebBasePath(cfg.webBasePath)}/* {
+    reverse_proxy 127.0.0.1:${parseInt(cfg.panelPort, 10) || 3000}
+  }
+
 ${masqueradeBlock}
 }
-${panelBlock}${subBlock}`;
+`;
 }
 
 // ── writeCaddyfileAtomic() ────────────────────────────────────────────────────
