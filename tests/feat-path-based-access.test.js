@@ -37,6 +37,31 @@ assert.match(mainDomainPaths, /basic_auth \{\s+admin \$2a\$12\$/,
 assert.doesNotMatch(mainDomainPaths, /\nexample\.com \{\n  tls/,
   'same-domain routes must not create duplicate Caddy site blocks');
 
+const normalizedMainHost = template.render({
+  ...base,
+  domain: 'example.com:443',
+  exposePanel: true,
+  panelDomain: 'EXAMPLE.com',
+  webBasePath: 'panel',
+  subBaseUrl: 'https://example.com:443',
+}, users);
+assert.doesNotMatch(normalizedMainHost, /\n(?:EXAMPLE\.com|example\.com)(?::443)? \{\n  tls/,
+  'explicit default HTTPS ports and hostname case must not add another site');
+assert.match(normalizedMainHost, /handle_path \/panel\/\*/);
+assert.match(normalizedMainHost, /handle \/sub\/\*/);
+
+const reportedHost = template.render({
+  ...base,
+  domain: 'alexfess.hopto.org',
+  exposePanel: true,
+  panelDomain: 'alexfess.hopto.org',
+  webBasePath: 'panel',
+  subBaseUrl: 'https://alexfess.hopto.org',
+}, users);
+assert.doesNotMatch(reportedHost, /\nalexfess\.hopto\.org \{\n  tls/,
+  'reported main hostname is never emitted as a second TLS site');
+assert.match(reportedHost, /:443, alexfess\.hopto\.org \{[\s\S]*handle \/sub\/\*[\s\S]*handle_path \/panel\/\*/);
+
 const subdomainPanel = template.render({
   ...base,
   exposePanel: true,
@@ -68,6 +93,10 @@ assert.strictEqual(template.renderSubBlock({
 // and append duplicate same-host site blocks. Keep those emergency paths safe.
 const serverSource = fs.readFileSync(require.resolve('../panel/server/index.js'), 'utf8');
 const updateSource = fs.readFileSync(require.resolve('../update.sh'), 'utf8');
+assert.match(serverSource, /domain:\s*config\.domain\s*\|\|\s*'localhost'/,
+  'runtime renderer receives the configured main hostname');
+assert.match(updateSource, /domain:\s*cfg\.domain\s*\|\|\s*'localhost'/,
+  'update/repair renderer receives the configured main hostname');
 assert.match(serverSource, /panelOnMain[\s\S]*!panelOnMain[\s\S]*sameCaddyHost\(subHost, config\.panelDomain\)/);
 assert.match(updateSource, /panelOnMain[\s\S]*!panelOnMain[\s\S]*sameHost\(subHost, cfg\.panelDomain\)/);
 const updateJsStart = updateSource.indexOf("cat > \"$rebuild_js\" <<'NODE_EOF'");

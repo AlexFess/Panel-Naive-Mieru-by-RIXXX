@@ -755,7 +755,7 @@ if (fs.existsSync(TEMPLATE_JS)) {
     try {
       const u = new URL(/^https?:\/\//i.test(String(raw || '')) ? String(raw) : `https://${raw}`);
       const isDefault = (u.protocol === 'https:' && u.port === '443') || (u.protocol === 'http:' && u.port === '80');
-      return u.hostname.toLowerCase() + (u.port && !isDefault ? `:${u.port}` : '');
+      return u.hostname.toLowerCase().replace(/\.$/, '') + (u.port && !isDefault ? `:${u.port}` : '');
     } catch { return String(raw || '').trim().toLowerCase().replace(/:443$/, ''); }
   };
   const sameHost = (a, b) => !!hostKey(a) && hostKey(a) === hostKey(b);

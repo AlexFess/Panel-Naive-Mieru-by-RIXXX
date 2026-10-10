@@ -127,6 +127,25 @@ function sanitizeWebBasePath(raw) {
   return s;
 }
 
+// Compare hostnames the way Caddy treats ordinary HTTPS site addresses: DNS
+// case and a trailing root dot are insignificant, and :443 is the default.
+function caddyHostKey(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    return url.hostname.toLowerCase().replace(/\.$/, '') + (url.port ? `:${url.port}` : '');
+  } catch {
+    return value.toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '')
+      .replace(/:443$/, '').replace(/\.$/, '');
+  }
+}
+
+function sameCaddyHost(a, b) {
+  const aKey = caddyHostKey(a);
+  return !!aKey && aKey === caddyHostKey(b);
+}
+
 function panelPathRoutes(cfg) {
   const baUser      = String(cfg.panelBasicAuthUser || '').trim();
   const baHash      = extractBcrypt(String(cfg.panelBasicAuthHash || ''));
@@ -145,19 +164,18 @@ function renderPanelBlock(cfg) {
   const email       = String(cfg.adminEmail || '').trim();
   const stubFile    = String(cfg.panelStubPage || '/var/www/panel-stub/index.html').trim();
   const webBasePath = sanitizeWebBasePath(cfg.webBasePath);
-  const mainDomain  = String(cfg.domain || '').trim().toLowerCase();
-  const panelHost   = panelDomain.toLowerCase();
+  const mainDomain  = String(cfg.domain || '').trim();
 
   // External access requires a hostname (main domain or subdomain) and a path.
   if (!expose || !panelDomain || !webBasePath) return '';
   // The main site block will include these routes; emitting a second block for
   // the same Caddy address causes duplicate-site conflicts.
-  if (panelHost === mainDomain) return '';
+  if (sameCaddyHost(panelDomain, mainDomain)) return '';
 
   const stubDir = stubFile.replace(/\/[^/]*$/, '') || '/var/www/panel-stub';
   const panelRoutes = panelPathRoutes(cfg);
   if (!panelRoutes) return '';
-  const subRoutes = subHostFromCfg(cfg).toLowerCase() === panelHost
+  const subRoutes = sameCaddyHost(subHostFromCfg(cfg), panelDomain)
     ? subPathRoutes(cfg) : '';
 
   return `
@@ -198,12 +216,12 @@ function subPathRoutes(cfg) {
 function renderSubBlock(cfg) {
   const host = subHostFromCfg(cfg);
   if (!host) return '';
-  const mainHost = String(cfg.domain || '').trim().toLowerCase();
-  const panelHost = String(cfg.panelDomain || '').trim().toLowerCase();
+  const mainHost = String(cfg.domain || '').trim();
+  const panelHost = String(cfg.panelDomain || '').trim();
   const expose = !!cfg.exposePanel;
   // Main-domain routes are inserted into the main Naive site; when panel and
   // subscription share a dedicated host, renderPanelBlock owns their one site.
-  if (host.toLowerCase() === mainHost || (expose && host.toLowerCase() === panelHost)) return '';
+  if (sameCaddyHost(host, mainHost) || (expose && sameCaddyHost(host, panelHost))) return '';
   const email     = String(cfg.adminEmail || '').trim();
   const panelPort = parseInt(cfg.panelPort, 10) || 3000;
   // v1.9.6: also expose the federation NODE endpoints on the sub domain. They are
@@ -233,13 +251,13 @@ ${subPathRoutes(cfg)}
 }
 
 function renderMainPathRoutes(cfg, mainDomain) {
-  const domain = String(mainDomain || '').trim().toLowerCase();
+  const domain = String(mainDomain || '').trim();
   // subBaseUrl() in the panel falls back to the main hostname when unset, so
   // the default subscription URL must be routed here as well.
-  const subHost = (subHostFromCfg(cfg) || domain).toLowerCase();
-  const panelHost = String(cfg.panelDomain || '').trim().toLowerCase();
-  const subHere = !!subHost && subHost === domain;
-  const panelHere = !!cfg.exposePanel && panelHost === domain;
+  const subHost = subHostFromCfg(cfg) || domain;
+  const panelHost = String(cfg.panelDomain || '').trim();
+  const subHere = sameCaddyHost(subHost, domain);
+  const panelHere = !!cfg.exposePanel && sameCaddyHost(panelHost, domain);
   if (!subHere && !panelHere) return '';
   let routes = '';
   if (subHere) routes += subPathRoutes(cfg);
