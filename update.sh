@@ -749,7 +749,33 @@ if (fs.existsSync(TEMPLATE_JS)) {
   if (probeMode === 'off') probeLine = '';
   else if (probeMode === 'secret' && probeSecret) probeLine = '\n    probe_resistance ' + probeSecret;
   else probeLine = '\n    probe_resistance';
-  // v1.4.0: panel external-access subdomain block (inline fallback)
+  // Inline fallback: avoid duplicate Caddy site addresses when panel and
+  // subscription routes share a hostname or the main site.
+  const hostKey = raw => {
+    try {
+      const u = new URL(/^https?:\/\//i.test(String(raw || '')) ? String(raw) : `https://${raw}`);
+      const isDefault = (u.protocol === 'https:' && u.port === '443') || (u.protocol === 'http:' && u.port === '80');
+      return u.hostname.toLowerCase() + (u.port && !isDefault ? `:${u.port}` : '');
+    } catch { return String(raw || '').trim().toLowerCase().replace(/:443$/, ''); }
+  };
+  const sameHost = (a, b) => !!hostKey(a) && hostKey(a) === hostKey(b);
+  const subRaw = String(cfg.subBaseUrl || '').trim();
+  let subHost = '';
+  if (subRaw) {
+    try { subHost = new URL(/^https?:\/\//i.test(subRaw) ? subRaw : `https://${subRaw}`).host; }
+    catch { subHost = subRaw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim(); }
+  }
+  const mainHost = String(cfg.domain || 'localhost').trim();
+  const panelOnMain = !!cfg.exposePanel && sameHost(cfg.panelDomain, mainHost);
+  const subOnMain = !subRaw || sameHost(subHost, mainHost);
+  let mainPathRoutes = '';
+  const proxyPort = parseInt(cfg.panelPort, 10) || 3000;
+  if (subOnMain) {
+    mainPathRoutes += '  handle /sub/* {\n    reverse_proxy 127.0.0.1:' + proxyPort +
+      '\n  }\n  handle /api/federation/* {\n    reverse_proxy 127.0.0.1:' + proxyPort + '\n  }\n';
+  }
+
+  // v1.4.0: panel external-access block (inline fallback)
   let panelBlock = '';
   {
     const expose = !!cfg.exposePanel;
@@ -759,26 +785,27 @@ if (fs.existsSync(TEMPLATE_JS)) {
     const stubF  = String(cfg.panelStubPage || '/var/www/panel-stub/index.html').trim();
     const wbp    = String(cfg.webBasePath || '').trim().replace(/^\/+|\/+$/g, '').replace(/[^A-Za-z0-9._~-]/g, '');
     const pPort  = parseInt(cfg.panelPort, 10) || 3000;
-    if (expose && pDom && wbp) {
+    if (expose && pDom && wbp && !panelOnMain) {
       const stubDir = stubF.replace(/\/[^/]*$/, '') || '/var/www/panel-stub';
       let ba = '';
       if (baUser && baHash) ba = '    basic_auth {\n      ' + baUser + ' ' + baHash + '\n    }\n';
+      const subRoutes = subRaw && sameHost(subHost, pDom)
+        ? '  handle /sub/* {\n    reverse_proxy 127.0.0.1:' + pPort +
+          '\n  }\n  handle /api/federation/* {\n    reverse_proxy 127.0.0.1:' + pPort + '\n  }\n\n' : '';
       panelBlock = '\n\n' + pDom + ' {\n  tls ' + (cfg.adminEmail || '') +
         '\n\n  redir /' + wbp + ' /' + wbp + '/ 301' +
         '\n\n  handle_path /' + wbp + '/* {\n' + ba + '    reverse_proxy 127.0.0.1:' + pPort +
-        '\n  }\n\n  handle {\n    root * ' + stubDir + '\n    file_server\n  }\n}\n';
+        '\n  }\n\n' + subRoutes + '  handle {\n    root * ' + stubDir + '\n    file_server\n  }\n}\n';
+    } else if (panelOnMain && wbp) {
+      let ba = '';
+      if (baUser && baHash) ba = '    basic_auth {\n      ' + baUser + ' ' + baHash + '\n    }\n';
+      mainPathRoutes += '  redir /' + wbp + ' /' + wbp + '/ 301\n  handle_path /' + wbp +
+        '/* {\n' + ba + '    reverse_proxy 127.0.0.1:' + pPort + '\n  }\n';
     }
   }
-  // v1.11.2 FIX: subscription sub-domain block (inline fallback — mirrors
-  // caddyTemplate.renderSubBlock + the index.js inline fallback). Emitted only
-  // when subBaseUrl is configured. Without this, a --repair that fell back to
-  // the inline path (caddyTemplate.js missing) would drop the sub host, exactly
-  // like the missing tpl.render({subBaseUrl}) above → /sub TLS internal error.
   let subBlock = '';
   {
-    const subRaw  = String(cfg.subBaseUrl || '').trim();
-    const subHost = subRaw ? subRaw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim() : '';
-    if (subHost) {
+    if (subHost && !subOnMain && !(cfg.exposePanel && sameHost(subHost, cfg.panelDomain))) {
       const pPort = parseInt(cfg.panelPort, 10) || 3000;
       subBlock = '\n\n' + subHost + ' {\n  tls ' + (cfg.adminEmail || '') +
         '\n  handle /sub/* {\n    reverse_proxy 127.0.0.1:' + pPort + '\n  }' +
@@ -786,6 +813,9 @@ if (fs.existsSync(TEMPLATE_JS)) {
         '\n  handle {\n    respond "Not found" 404\n  }\n}\n';
     }
   }
+  const mainSiteHandlers = mainPathRoutes
+    ? mainPathRoutes + '  handle {\n  file_server {\n    root ' + (cfg.fakeSiteDir || FAKE_SITE) + '\n  }\n  }'
+    : '  file_server {\n    root ' + (cfg.fakeSiteDir || FAKE_SITE) + '\n  }';
   content = [
     '{',
     '  order forward_proxy first',
@@ -828,9 +858,7 @@ if (fs.existsSync(TEMPLATE_JS)) {
     '    hide_via' + probeLine,
     '  }',
     '',
-    '  file_server {',
-    '    root ' + (cfg.fakeSiteDir || FAKE_SITE),
-    '  }',
+    mainSiteHandlers,
     '}'
   ].join('\n') + panelBlock + subBlock;
 }

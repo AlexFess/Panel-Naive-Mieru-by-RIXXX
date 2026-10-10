@@ -605,8 +605,31 @@ function buildCaddyfile(config, users) {
     }
   }
 
-  // v1.4.0: panel external-access subdomain block (inline fallback — mirrors
-  // caddyTemplate.renderPanelBlock). Emitted only when external access is on.
+  // Inline fallback: combine panel/subscription paths with the existing site
+  // when they share a hostname; Caddy rejects duplicate site addresses.
+  const caddyHostKey = raw => {
+    try {
+      const u = new URL(/^https?:\/\//i.test(String(raw || '')) ? String(raw) : `https://${raw}`);
+      const isDefault = (u.protocol === 'https:' && u.port === '443') || (u.protocol === 'http:' && u.port === '80');
+      return u.hostname.toLowerCase() + (u.port && !isDefault ? `:${u.port}` : '');
+    } catch { return String(raw || '').trim().toLowerCase().replace(/:443$/, ''); }
+  };
+  const sameCaddyHost = (a, b) => !!caddyHostKey(a) && caddyHostKey(a) === caddyHostKey(b);
+  const subRaw = String(config.subBaseUrl || '').trim();
+  let subHost = '';
+  if (subRaw) {
+    try { subHost = new URL(/^https?:\/\//i.test(subRaw) ? subRaw : `https://${subRaw}`).host; }
+    catch { subHost = subRaw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim(); }
+  }
+  const mainDomain = String(config.domain || 'localhost').trim();
+  const panelOnMain = !!config.exposePanel && sameCaddyHost(config.panelDomain, mainDomain);
+  const subOnMain = !subRaw || sameCaddyHost(subHost, mainDomain);
+  let mainPathRoutes = '';
+  if (subOnMain) {
+    mainPathRoutes += `  handle /sub/* {\n    reverse_proxy 127.0.0.1:${config.panelPort || 3000}\n  }\n  handle /api/federation/* {\n    reverse_proxy 127.0.0.1:${config.panelPort || 3000}\n  }\n`;
+  }
+
+  // v1.4.0: panel external-access block when using a separate hostname.
   let panelBlock = '';
   {
     const expose      = !!config.exposePanel;
@@ -620,12 +643,21 @@ function buildCaddyfile(config, users) {
     const stubFile    = String(config.panelStubPage || '/var/www/panel-stub/index.html').trim();
     let   webBasePath = String(config.webBasePath || '').trim().replace(/^\/+|\/+$/g, '').replace(/[^A-Za-z0-9._~-]/g, '');
     const panelPort   = parseInt(config.panelPort, 10) || 3000;
-    if (expose && panelDomain && webBasePath) {
+    if (expose && panelDomain && webBasePath && !panelOnMain) {
       const stubDir = stubFile.replace(/\/[^/]*$/, '') || '/var/www/panel-stub';
       let ba = '';
       if (baUser && baHash) ba = `    basic_auth {\n      ${baUser} ${baHash}\n    }\n`;
+      const subRoutes = subRaw && sameCaddyHost(subHost, panelDomain)
+        ? `  handle /sub/* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }\n  handle /api/federation/* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }\n\n` : '';
       panelBlock =
-`\n\n# ── v1.4.0: panel external access (TLS + basic_auth + webBasePath) ────────────\n${panelDomain} {\n  tls ${config.adminEmail || ''}\n\n  # BUG-140: normalize bare base path to trailing slash (relative-asset resolve)\n  redir /${webBasePath} /${webBasePath}/ 301\n\n  handle_path /${webBasePath}/* {\n${ba}    reverse_proxy 127.0.0.1:${panelPort}\n  }\n\n  # Root and any path outside the secret base path → static stub (not a redirect)\n  handle {\n    root * ${stubDir}\n    file_server\n  }\n}\n`;
+`\n\n# ── panel external access ────────────────────────────────────────────────────\n${panelDomain} {\n  tls ${config.adminEmail || ''}\n\n  redir /${webBasePath} /${webBasePath}/ 301\n\n  handle_path /${webBasePath}/* {\n${ba}    reverse_proxy 127.0.0.1:${panelPort}\n  }\n\n${subRoutes}  handle {\n    root * ${stubDir}\n    file_server\n  }\n}\n`;
+    } else if (panelOnMain) {
+      const mainPath = String(config.webBasePath || '').trim().replace(/^\/+|\/+$/g, '').replace(/[^A-Za-z0-9._~-]/g, '');
+      if (mainPath) {
+        let ba = '';
+        if (baUser && baHash) ba = `    basic_auth {\n      ${baUser} ${baHash}\n    }\n`;
+        mainPathRoutes += `  redir /${mainPath} /${mainPath}/ 301\n  handle_path /${mainPath}/* {\n${ba}    reverse_proxy 127.0.0.1:${panelPort}\n  }\n`;
+      }
     }
   }
 
@@ -633,9 +665,7 @@ function buildCaddyfile(config, users) {
   // caddyTemplate.renderSubBlock). Emitted only when subBaseUrl is configured.
   let subBlock = '';
   {
-    const subRaw  = String(config.subBaseUrl || '').trim();
-    const subHost = subRaw ? subRaw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim() : '';
-    if (subHost) {
+    if (subHost && !subOnMain && !(config.exposePanel && sameCaddyHost(subHost, config.panelDomain))) {
       const panelPort = parseInt(config.panelPort, 10) || 3000;
       // v1.9.6: expose the hardened federation NODE endpoint on the sub domain
       // too (mirrors caddyTemplate.renderSubBlock) so a HUB panel can pull this
@@ -688,7 +718,7 @@ ${authLines}
     hide_via${probeLine}${upstreamLine}
   }
 
-${masqueradeBlock}
+${mainSiteHandlers}
 }
 ${panelBlock}${subBlock}`;
 }
@@ -1872,6 +1902,9 @@ app.post('/api/config', requireAuth, (req, res) => {
       }
     }
   }
+  const mainSiteHandlers = mainPathRoutes
+    ? `${mainPathRoutes}  handle {\n${masqueradeBlock}\n  }`
+    : masqueradeBlock;
 
   // v1.9.5: validate federationNodes BEFORE mutating cfg. It must be an array of
   // { name, url, token, enabled } objects with plausible http(s) urls. A bad

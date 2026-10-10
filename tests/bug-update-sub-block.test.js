@@ -41,8 +41,10 @@ ok(/tpl\.render\(\{[\s\S]*subBaseUrl:\s*cfg\.subBaseUrl\s*\|\|\s*''[\s\S]*\},\s*
 console.log('\n[2] update.sh inline fallback builds a sub-block');
 ok(/let\s+subBlock\s*=\s*''/.test(rebuild),
    'inline fallback declares a subBlock');
-ok(/cfg\.subBaseUrl/.test(rebuild.slice(rebuild.indexOf('let subBlock'))),
-   'inline fallback reads cfg.subBaseUrl');
+ok(/cfg\.subBaseUrl/.test(rebuild),
+   'inline fallback reads cfg.subBaseUrl before coalescing same-host routes');
+ok(/!subOnMain && !\(cfg\.exposePanel && sameHost\(subHost, cfg\.panelDomain\)\)/.test(rebuild),
+   'inline fallback skips the separate subscription site when it shares the main/panel hostname');
 ok(/handle \/api\/federation\/\*/.test(rebuild),
    'inline fallback sub-block exposes /api/federation/*');
 ok(/handle \/sub\/\*/.test(rebuild),

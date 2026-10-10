@@ -2,6 +2,8 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const vm = require('vm');
 const template = require('../panel/server/caddyTemplate');
 
 const base = {
@@ -50,9 +52,28 @@ const sharedDedicatedHost = template.render({
   exposePanel: true,
   panelDomain: 'links.example.com',
   webBasePath: 'panel',
-  subBaseUrl: 'https://links.example.com',
+  subBaseUrl: 'https://LINKS.example.com:443',
 }, users);
 assert.strictEqual((sharedDedicatedHost.match(/links\.example\.com \{/g) || []).length, 1);
 assert.match(sharedDedicatedHost, /links\.example\.com \{[\s\S]*handle_path \/panel\/\*[\s\S]*handle \/sub\/\*/);
+assert.strictEqual(template.renderSubBlock({
+  ...base,
+  exposePanel: true,
+  panelDomain: 'links.example.com',
+  webBasePath: 'panel',
+  subBaseUrl: 'https://LINKS.example.com:443',
+}), '', 'no separate subscription site block is emitted for the panel hostname');
+
+// The old inline repair/runtime fallbacks used to bypass the shared renderer
+// and append duplicate same-host site blocks. Keep those emergency paths safe.
+const serverSource = fs.readFileSync(require.resolve('../panel/server/index.js'), 'utf8');
+const updateSource = fs.readFileSync(require.resolve('../update.sh'), 'utf8');
+assert.match(serverSource, /panelOnMain[\s\S]*!panelOnMain[\s\S]*sameCaddyHost\(subHost, config\.panelDomain\)/);
+assert.match(updateSource, /panelOnMain[\s\S]*!panelOnMain[\s\S]*sameHost\(subHost, cfg\.panelDomain\)/);
+const updateJsStart = updateSource.indexOf("cat > \"$rebuild_js\" <<'NODE_EOF'");
+const updateJsBody = updateSource.indexOf('\n', updateJsStart) + 1;
+const updateJsEnd = updateSource.indexOf('\nNODE_EOF', updateJsBody);
+assert.ok(updateJsStart >= 0 && updateJsEnd > updateJsBody, 'update repair JS heredoc is present');
+new vm.Script(updateSource.slice(updateJsBody, updateJsEnd), { filename: 'update-rebuild.js' });
 
 console.log('Path-based panel and subscription routing tests passed');
