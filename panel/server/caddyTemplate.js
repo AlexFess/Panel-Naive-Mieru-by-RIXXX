@@ -127,6 +127,30 @@ function sanitizeWebBasePath(raw) {
   return s;
 }
 
+function panelRoute(cfg) {
+  const wbp = sanitizeWebBasePath(cfg.webBasePath);
+  if (!cfg.exposePanel || !wbp || wbp.toLowerCase() === 'sub') return '';
+  const user = String(cfg.panelBasicAuthUser || '').trim();
+  const hash = extractBcrypt(cfg.panelBasicAuthHash);
+  const auth = user && hash ? `    basic_auth {\n      ${user} ${hash}\n    }\n` : '';
+  return `  redir /${wbp} /${wbp}/ 301
+  handle_path /${wbp}/* {
+${auth}    reverse_proxy 127.0.0.1:${parseInt(cfg.panelPort, 10) || 3000}
+  }
+`;
+}
+
+function publicRoutes(cfg) {
+  const port = parseInt(cfg.panelPort, 10) || 3000;
+  return `  handle /sub/* {
+    reverse_proxy 127.0.0.1:${port}
+  }
+  handle /api/federation/* {
+    reverse_proxy 127.0.0.1:${port}
+  }
+`;
+}
+
 function renderPanelBlock(cfg) {
   const expose      = !!cfg.exposePanel;
   const panelDomain = String(cfg.panelDomain || '').trim();
@@ -144,7 +168,7 @@ function renderPanelBlock(cfg) {
   const panelPort   = parseInt(cfg.panelPort, 10) || 3000;
 
   // External access requires, at minimum, a panel subdomain and a webBasePath.
-  if (!expose || !panelDomain || !webBasePath) return '';
+  if (!expose || !panelDomain || !webBasePath || webBasePath.toLowerCase() === 'sub') return '';
 
   // The stub root directory holds the local static "CONNECTION" page that is
   // served for the subdomain root and any path outside webBasePath.
@@ -183,6 +207,7 @@ ${panelDomain} {
 ${basicAuthBlock}    reverse_proxy 127.0.0.1:${panelPort}
   }
 
+${subHostFromCfg(cfg).toLowerCase() === panelDomain.toLowerCase() ? publicRoutes(cfg) : ''}
   # Root and any path outside the secret base path → static stub (not a redirect)
   handle {
     root * ${stubDir}
@@ -402,19 +427,11 @@ ${authLines}
     hide_via${probeLine}${upstreamLine}
   }
 
-  redir /sub /sub/ 301
-  handle /sub/* {
-    reverse_proxy 127.0.0.1:${parseInt(cfg.panelPort, 10) || 3000}
-  }
-
-  redir /${sanitizeWebBasePath(cfg.webBasePath)} /${sanitizeWebBasePath(cfg.webBasePath)}/ 301
-  handle /${sanitizeWebBasePath(cfg.webBasePath)}/* {
-    reverse_proxy 127.0.0.1:${parseInt(cfg.panelPort, 10) || 3000}
-  }
-
+${publicRoutes(cfg)}
+${String(cfg.panelDomain || '').trim().toLowerCase() === domain.toLowerCase() ? panelRoute(cfg) : ''}
 ${masqueradeBlock}
 }
-`;
+${String(cfg.panelDomain || '').trim().toLowerCase() !== domain.toLowerCase() ? renderPanelBlock(cfg) : ''}${subHostFromCfg(cfg).toLowerCase() !== domain.toLowerCase() && !(renderPanelBlock(cfg) && subHostFromCfg(cfg).toLowerCase() === String(cfg.panelDomain || '').trim().toLowerCase()) ? renderSubBlock(cfg) : ''}`;
 }
 
 module.exports = { render, renderPanelBlock, renderSubBlock, sanitizeWebBasePath };

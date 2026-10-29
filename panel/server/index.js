@@ -646,6 +646,26 @@ function buildCaddyfile(config, users) {
 //     }
 //   }
 
+  // Mirror the shared template if it is unavailable during first boot.
+  const mainHost = String(config.domain || 'localhost').trim().toLowerCase();
+  const panelHost = String(config.panelDomain || '').trim();
+  const subHost = String(config.subBaseUrl || '').trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  const wbp = String(config.webBasePath || '').trim().replace(/^\/+|\/+$/g, '').replace(/[^A-Za-z0-9._~-]/g, '');
+  const panelPort = parseInt(config.panelPort, 10) || 3000;
+  const hash = extractBcrypt(String(config.panelBasicAuthHash || ''));
+  const auth = config.panelBasicAuthUser && hash ? `    basic_auth {\n      ${config.panelBasicAuthUser} ${hash}\n    }\n` : '';
+  const publicRoutes = `  handle /sub/* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }\n  handle /api/federation/* {\n    reverse_proxy 127.0.0.1:${panelPort}\n  }\n`;
+  const route = config.exposePanel && panelHost && wbp && wbp.toLowerCase() !== 'sub'
+    ? `  redir /${wbp} /${wbp}/ 301\n  handle_path /${wbp}/* {\n${auth}    reverse_proxy 127.0.0.1:${panelPort}\n  }\n` : '';
+  const fallbackPanelRoute = panelHost.toLowerCase() === mainHost ? route : '';
+  if (route && panelHost.toLowerCase() !== mainHost) {
+    const stubDir = String(config.panelStubPage || '/var/www/panel-stub/index.html').replace(/\/[^/]*$/, '') || '/var/www/panel-stub';
+    panelBlock = `\n${panelHost} {\n  tls ${config.adminEmail || ''}\n${route}${subHost.toLowerCase() === panelHost.toLowerCase() ? publicRoutes : ''}  handle {\n    root * ${stubDir}\n    file_server\n  }\n}\n`;
+  }
+  if (subHost && subHost.toLowerCase() !== mainHost && !(route && subHost.toLowerCase() === panelHost.toLowerCase())) {
+    subBlock = `\n${subHost} {\n  tls ${config.adminEmail || ''}\n${publicRoutes}  handle {\n    respond "Not found" 404\n  }\n}\n`;
+  }
+
   // Bug 28: no "tls <email>" inside site block
   // Bug 30: order directive in global block
   // Bug 38: roll_keep_for 720h
@@ -688,19 +708,16 @@ ${authLines}
     hide_via${probeLine}${upstreamLine}
   }
 
-  redir /sub /sub/ 301
   handle /sub/* {
-    reverse_proxy 127.0.0.1:${parseInt(cfg.panelPort, 10) || 3000}
+    reverse_proxy 127.0.0.1:${parseInt(config.panelPort, 10) || 3000}
   }
-
-  redir /${sanitizeWebBasePath(cfg.webBasePath)} /${sanitizeWebBasePath(cfg.webBasePath)}/ 301
-  handle /${sanitizeWebBasePath(cfg.webBasePath)}/* {
-    reverse_proxy 127.0.0.1:${parseInt(cfg.panelPort, 10) || 3000}
+  handle /api/federation/* {
+    reverse_proxy 127.0.0.1:${parseInt(config.panelPort, 10) || 3000}
   }
-
+${fallbackPanelRoute}
 ${masqueradeBlock}
 }
-`;
+${panelBlock}${subBlock}`;
 }
 
 // ── writeCaddyfileAtomic() ────────────────────────────────────────────────────
@@ -2286,13 +2303,15 @@ app.post('/api/panel/external-access', requireAuth, (req, res) => {
   if (enabled) {
     const domain = String(body.panelDomain || cfg.panelDomain || '').trim();
     if (!domain || !HOSTNAME_RE.test(domain))
-      return res.status(400).json({ error: 'Valid panel subdomain required (e.g. panel.example.com)' });
+      return res.status(400).json({ error: 'Valid panel domain required (e.g. example.com)' });
 
     // webBasePath: explicit value (sanitized) or keep existing or generate.
     let wbp = String(body.webBasePath || cfg.webBasePath || '').trim().replace(/^\/+|\/+$/g, '');
     if (!wbp) wbp = crypto.randomBytes(8).toString('hex');
     if (!WEBBASE_RE.test(wbp))
       return res.status(400).json({ error: 'webBasePath must match [A-Za-z0-9._~-] (1–64 chars)' });
+    if (wbp.toLowerCase() === 'sub')
+      return res.status(400).json({ error: 'webBasePath cannot be sub (reserved for subscriptions)' });
 
     const baUser = String(body.basicAuthUser || cfg.panelBasicAuthUser || 'admin').trim();
     if (!USERNAME_RE.test(baUser))

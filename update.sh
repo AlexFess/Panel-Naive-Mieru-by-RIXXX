@@ -749,24 +749,31 @@ if (fs.existsSync(TEMPLATE_JS)) {
   if (probeMode === 'off') probeLine = '';
   else if (probeMode === 'secret' && probeSecret) probeLine = '\n    probe_resistance ' + probeSecret;
   else probeLine = '\n    probe_resistance';
+  const mainHost = String(cfg.domain || 'localhost').trim().toLowerCase();
+  const pHost = String(cfg.panelDomain || '').trim().toLowerCase();
+  const sHost = String(cfg.subBaseUrl || '').trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase();
+  let mainPanelRoute = '';
   // v1.4.0: panel external-access subdomain block (inline fallback)
   let panelBlock = '';
   {
     const expose = !!cfg.exposePanel;
     const pDom   = String(cfg.panelDomain || '').trim();
     const baUser = String(cfg.panelBasicAuthUser || '').trim();
-    const baHash = String(cfg.panelBasicAuthHash || '').trim();
+    const baHash = (String(cfg.panelBasicAuthHash || '').match(/\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}/g) || []).pop() || '';
     const stubF  = String(cfg.panelStubPage || '/var/www/panel-stub/index.html').trim();
     const wbp    = String(cfg.webBasePath || '').trim().replace(/^\/+|\/+$/g, '').replace(/[^A-Za-z0-9._~-]/g, '');
     const pPort  = parseInt(cfg.panelPort, 10) || 3000;
-    if (expose && pDom && wbp) {
+    if (expose && pDom && wbp && wbp.toLowerCase() !== 'sub') {
       const stubDir = stubF.replace(/\/[^/]*$/, '') || '/var/www/panel-stub';
       let ba = '';
       if (baUser && baHash) ba = '    basic_auth {\n      ' + baUser + ' ' + baHash + '\n    }\n';
-      panelBlock = '\n\n' + pDom + ' {\n  tls ' + (cfg.adminEmail || '') +
-        '\n\n  redir /' + wbp + ' /' + wbp + '/ 301' +
-        '\n\n  handle_path /' + wbp + '/* {\n' + ba + '    reverse_proxy 127.0.0.1:' + pPort +
-        '\n  }\n\n  handle {\n    root * ' + stubDir + '\n    file_server\n  }\n}\n';
+      const route = '  redir /' + wbp + ' /' + wbp + '/ 301\n' +
+        '  handle_path /' + wbp + '/* {\n' + ba + '    reverse_proxy 127.0.0.1:' + pPort + '\n  }\n';
+      const publicRoutes = '  handle /sub/* {\n    reverse_proxy 127.0.0.1:' + pPort + '\n  }\n' +
+        '  handle /api/federation/* {\n    reverse_proxy 127.0.0.1:' + pPort + '\n  }\n';
+      if (pHost === mainHost) mainPanelRoute = route;
+      else panelBlock = '\n\n' + pDom + ' {\n  tls ' + (cfg.adminEmail || '') + '\n' + route +
+        (sHost === pHost ? publicRoutes : '') + '  handle {\n    root * ' + stubDir + '\n    file_server\n  }\n}\n';
     }
   }
   // v1.11.2 FIX: subscription sub-domain block (inline fallback — mirrors
@@ -778,7 +785,7 @@ if (fs.existsSync(TEMPLATE_JS)) {
   {
     const subRaw  = String(cfg.subBaseUrl || '').trim();
     const subHost = subRaw ? subRaw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim() : '';
-    if (subHost) {
+    if (subHost && sHost !== mainHost && !(panelBlock && sHost === pHost)) {
       const pPort = parseInt(cfg.panelPort, 10) || 3000;
       subBlock = '\n\n' + subHost + ' {\n  tls ' + (cfg.adminEmail || '') +
         '\n  handle /sub/* {\n    reverse_proxy 127.0.0.1:' + pPort + '\n  }' +
@@ -828,6 +835,9 @@ if (fs.existsSync(TEMPLATE_JS)) {
     '    hide_via' + probeLine,
     '  }',
     '',
+    '  handle /sub/* {\n    reverse_proxy 127.0.0.1:' + (parseInt(cfg.panelPort, 10) || 3000) + '\n  }',
+    '  handle /api/federation/* {\n    reverse_proxy 127.0.0.1:' + (parseInt(cfg.panelPort, 10) || 3000) + '\n  }',
+    mainPanelRoute,
     '  file_server {',
     '    root ' + (cfg.fakeSiteDir || FAKE_SITE),
     '  }',
@@ -1848,6 +1858,7 @@ do_expose() {
   # Sanitize to a path-safe token (strip slashes / unsafe chars).
   web_base_path="$(printf '%s' "$web_base_path" | sed 's#^/*##; s#/*$##; s#[^A-Za-z0-9._~-]##g')"
   [[ -z "$web_base_path" ]] && web_base_path="$(gen_web_base_path)"
+  [[ "${web_base_path,,}" == "sub" ]] && die "webBasePath cannot be sub (reserved for subscriptions)"
 
   # Basic-auth credentials. Keep an existing user; generate a password and hash
   # only when none is stored yet (first enable). The plaintext is shown ONCE.
